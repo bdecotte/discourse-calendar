@@ -1,8 +1,9 @@
 import I18n from "I18n";
 import { withPluginApi } from "discourse/lib/plugin-api";
-import { cancel, later } from "@ember/runloop";
+import { cancel } from "@ember/runloop";
 import getURL from "discourse-common/lib/get-url";
 import { emojiUnescape } from "discourse/lib/text";
+import discourseLater from "discourse-common/lib/later";
 
 function applyFlairOnMention(element, username) {
   if (!element) {
@@ -28,7 +29,7 @@ export default {
 
   initialize() {
     withPluginApi("0.10.1", (api) => {
-      const usernames = api.container.lookup("site:main").users_on_holiday;
+      const usernames = api.container.lookup("service:site").users_on_holiday;
 
       if (usernames && usernames.length > 0) {
         api.addUsernameSelectorDecorator((username) => {
@@ -43,7 +44,7 @@ export default {
     });
 
     withPluginApi("0.8", (api) => {
-      const usernames = api.container.lookup("site:main").users_on_holiday;
+      const usernames = api.container.lookup("service:site").users_on_holiday;
 
       if (usernames?.length > 0) {
         let flairHandler;
@@ -68,7 +69,7 @@ export default {
             } else {
               // decorating preview
               cancel(flairHandler);
-              flairHandler = later(
+              flairHandler = discourseLater(
                 () =>
                   usernames.forEach((username) =>
                     applyFlairOnMention(element, username)
