@@ -345,6 +345,8 @@ after_initialize do
     ../lib/event_validator.rb
     ../lib/group_timezones.rb
     ../lib/time_sniffer.rb
+    ../lib/users_on_holiday.rb
+    ../lib/holiday_status.rb
   ].each { |path| load File.expand_path(path, __FILE__) }
 
   register_post_custom_field_type(
@@ -506,7 +508,7 @@ after_initialize do
     DiscourseCalendar.users_on_holiday
   end
 
-  add_to_serializer(:site, :include_users_on_holiday?) { SiteSetting.holiday_calendar_users_public || scope.is_staff? }
+  add_to_serializer(:site, :include_users_on_holiday?) { scope.is_staff? }
 
   reloadable_patch do
     module DiscoursePostEvent::ExportCsvControllerExtension
