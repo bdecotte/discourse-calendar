@@ -252,6 +252,9 @@ describe Post do
           end
 
           it 'works with allowedGroups attribute' do
+            Fabricate(:group, name: "euro")
+            Fabricate(:group, name: "america")
+
             post = create_post_with_event(user, 'allowedGroups="euro"').reload
             expect(post.event.raw_invitees).to eq([])
 
@@ -290,6 +293,18 @@ describe Post do
               create_post_with_event(user, 'status="private" allowedGroups=')
                 .reload
             expect(post.event.raw_invitees).to eq([])
+          end
+
+          it "works with localised automatic group names" do
+            I18n.locale = SiteSetting.default_locale = 'fr'
+
+            group = Group.find(Group::AUTO_GROUPS[:trust_level_0])
+            group.update!(name: I18n.t("groups.default_names.trust_level_0"))
+
+            post =
+              create_post_with_event(user, 'status="public" allowedGroups="trust_level_0"')
+                .reload
+            expect(post.event.raw_invitees).to eq(%w[trust_level_0])
           end
 
           it 'works with reminders attribute' do
@@ -569,6 +584,37 @@ describe Post do
         expect(event_1.status).to eq(Event.statuses[:public])
       end
     end
+
+    it "rejects private groups in allowedGroups" do
+      moderator = Fabricate(:user, moderator: true)
+      private_group = Fabricate(
+        :group,
+        visibility_level: Group.visibility_levels[:owners])
+
+      expect {
+        create_post_with_event(moderator, "allowedGroups='#{private_group.name}'")
+      }.to raise_error(ActiveRecord::RecordNotSaved)
+    end
+
+    it "rejects non-existent groups in allowedGroups" do
+      moderator = Fabricate(:user, moderator: true)
+
+      expect {
+        create_post_with_event(moderator, "allowedGroups='non-existent_group_name'")
+      }.to raise_error(ActiveRecord::RecordNotSaved)
+    end
+
+    it "rejects public groups with private members in allowedGroups" do
+      moderator = Fabricate(:user, moderator: true)
+      public_group_with_private_members = Fabricate(
+        :group,
+        visibility_level: Group.visibility_levels[:public],
+        members_visibility_level: Group.visibility_levels[:owners])
+
+      expect {
+        create_post_with_event(moderator, "allowedGroups='#{public_group_with_private_members.name}'")
+      }.to raise_error(ActiveRecord::RecordNotSaved)
+    end
   end
 
   context "with holiday events" do
@@ -576,14 +622,97 @@ describe Post do
 
     before do
       SiteSetting.holiday_calendar_topic_id = calendar_post.topic_id
+      SiteSetting.enable_user_status = true
+    end
+
+    context "when adding a post with an event" do
+      it "sets holiday user status" do
+        freeze_time Time.utc(2018, 6, 5, 10, 30)
+
+        raw = 'Vacation [date="2018-06-05" time="10:20:00"] to [date="2018-06-06" time="10:20:00"]'
+        post = create_post(raw: raw, topic: calendar_post.topic)
+
+        status = post.user.user_status
+        expect(status).to be_present
+        expect(status.description).to eq(I18n.t("discourse_calendar.holiday_status.description"))
+        expect(status.emoji).to eq(DiscourseCalendar::HolidayStatus::EMOJI)
+        expect(status.ends_at).to eq_time(Time.utc(2018, 6, 6, 10, 20))
+      end
+
+      it "doesn't set holiday user status if user already has custom user status" do
+        freeze_time Time.utc(2018, 6, 5, 10, 30)
+
+        # user sets a custom status
+        custom_status = {
+          description: "I am working on holiday",
+          emoji: "construction_worker_man"
+        }
+        user.set_status!(custom_status[:description], custom_status[:emoji])
+
+        raw = 'Vacation [date="2018-06-05" time="10:20:00"] to [date="2018-06-06" time="10:20:00"]'
+        post = create_post(raw: raw, topic: calendar_post.topic, user: user)
+
+        # a holiday status wasn't set:
+        status = post.user.user_status
+        expect(status).to be_present
+        expect(status.description).to eq(custom_status[:description])
+        expect(status.emoji).to eq(custom_status[:emoji])
+      end
+    end
+
+    context "when updating event dates" do
+      it "sets holiday user status" do
+        freeze_time Time.utc(2018, 6, 5, 10, 30)
+        today = "2018-06-05"
+        tomorrow = "2018-06-06"
+
+        raw = "Vacation [date='#{tomorrow}']"
+        post = create_post(raw: raw, topic: calendar_post.topic)
+        expect(post.user.user_status).to be_blank
+
+        PostRevisor.new(post).revise!(post.user, { raw: "Vacation [date='#{today}']" })
+        post.reload
+
+        status = post.user.user_status
+        expect(status).to be_present
+        expect(status.description).to eq(I18n.t("discourse_calendar.holiday_status.description"))
+        expect(status.emoji).to eq(DiscourseCalendar::HolidayStatus::EMOJI)
+        expect(status.ends_at).to eq_time(Time.utc(2018, 6, 6, 0, 0))
+      end
+
+      it "doesn't set holiday user status if user already has custom user status" do
+        freeze_time Time.utc(2018, 6, 5, 10, 30)
+        today = "2018-06-05"
+        tomorrow = "2018-06-06"
+
+        raw = "Vacation [date='#{tomorrow}']"
+        post = create_post(raw: raw, topic: calendar_post.topic)
+        expect(post.user.user_status).to be_blank
+
+        # user sets a custom status
+        custom_status = {
+          description: "I am working on holiday",
+          emoji: "construction_worker_man"
+        }
+        post.user.set_status!(custom_status[:description], custom_status[:emoji])
+
+        PostRevisor.new(post).revise!(post.user, { raw: "Vacation [date='#{today}']" })
+        post.reload
+
+        # a holiday status wasn't set:
+        status = post.user.user_status
+        expect(status).to be_present
+        expect(status.description).to eq(custom_status[:description])
+        expect(status.emoji).to eq(custom_status[:emoji])
+      end
     end
 
     context "when deleting a post with an event" do
       it "clears user status that was previously set by the calendar plugin" do
-        SiteSetting.enable_user_status = true
+        freeze_time Time.utc(2018, 6, 5, 10, 30)
+
         raw = 'Vacation [date="2018-06-05" time="10:20:00"] to [date="2018-06-06" time="10:20:00"]'
         post = create_post(raw: raw, topic: calendar_post.topic)
-        freeze_time Time.utc(2018, 6, 5, 10, 30)
         DiscourseCalendar::UpdateHolidayUsernames.new.execute(nil)
 
         # the job has set the holiday status:
@@ -601,10 +730,10 @@ describe Post do
       end
 
       it "doesn't clear user status that wasn't set by the calendar plugin" do
-        SiteSetting.enable_user_status = true
+        freeze_time Time.utc(2018, 6, 5, 10, 30)
+
         raw = 'Vacation [date="2018-06-05" time="10:20:00"] to [date="2018-06-06" time="10:20:00"]'
         post = create_post(raw: raw, topic: calendar_post.topic)
-        freeze_time Time.utc(2018, 6, 5, 10, 30)
         DiscourseCalendar::UpdateHolidayUsernames.new.execute(nil)
 
         # the job has set the holiday status:
@@ -614,7 +743,7 @@ describe Post do
         expect(status.emoji).to eq(DiscourseCalendar::HolidayStatus::EMOJI)
         expect(status.ends_at).to eq_time(Time.utc(2018, 6, 6, 10, 20))
 
-        # user set their own status
+        # user sets a custom status
         custom_status = {
           description: "I am working on holiday",
           emoji: "construction_worker_man"
