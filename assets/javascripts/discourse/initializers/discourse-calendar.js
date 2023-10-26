@@ -311,7 +311,7 @@ function initializeDiscourseCalendar(api) {
       views: {
         listNextYear: {
           type: "list",
-          duration: { days: 365 },
+          duration: { days: 7 },
           buttonText: "list",
           listDayFormat: {
             month: "long",
@@ -389,6 +389,7 @@ function initializeDiscourseCalendar(api) {
 
     let event = {
       start: from.dateTime.format(dateFormat),
+      rrule: from.recurringRule,
       allDay: false,
     };
 
@@ -518,6 +519,7 @@ function initializeDiscourseCalendar(api) {
         ? {
             dateTime: moment(detail.from),
             weeklyRecurring: detail.recurring === "1.weeks",
+            recurringRule: detail.recurring,
           }
         : null,
       detail.to
@@ -566,6 +568,19 @@ function initializeDiscourseCalendar(api) {
       event.title = detail.username;
       event.backgroundColor = colorToHex(color);
       event.textColor = colorToHex(contrastColor(color));
+      if (
+      text[1] === 'REAA'
+      ) {
+      event.backgroundColor = '#df0f0f';
+      } else if (
+      text[1] === 'RMM'
+      ) {
+      event.backgroundColor = '#703cff';
+      } else if (
+      text[1] === 'RF'
+      ){
+      event.backgroundColor = '#25b7ff';
+      }
     }
 
     let popupText = detail.message.slice(0, 100);
